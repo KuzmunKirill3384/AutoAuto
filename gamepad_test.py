@@ -1,22 +1,22 @@
 import RPi.GPIO as GPIO
 import pygame
-import cv2
 import numpy as np
 from time import sleep, time
 import os
-import threading
 import json
 from datetime import datetime
 import atexit
 from gpiozero import MCP3008  # For analog voltage readings
 
+# Disable GPIO warnings
+GPIO.setwarnings(False)
+
 # Set up directory structure for data collection
 DATA_DIR = "training_data"
-IMAGE_DIR = os.path.join(DATA_DIR, "images")
 VOLTAGE_DIR = os.path.join(DATA_DIR, "voltage")
 CONTROL_DIR = os.path.join(DATA_DIR, "controls")
 
-for directory in [DATA_DIR, IMAGE_DIR, VOLTAGE_DIR, CONTROL_DIR]:
+for directory in [DATA_DIR, VOLTAGE_DIR, CONTROL_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
 
@@ -52,16 +52,12 @@ right_pwm = GPIO.PWM(right_en, 1000)
 right_pwm.start(25)
 
 # Setup MCP3008 ADC for voltage readings (assuming voltage divider on channel 0)
-adc = MCP3008(channel=0)
-
-# Initialize camera
-camera = cv2.VideoCapture(0)  # Use 0 for default camera
-camera.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-if not camera.isOpened():
-    print("Error: Could not open camera.")
-    GPIO.cleanup()
-    exit()
+try:
+    adc = MCP3008(channel=0)
+    voltage_sensor_enabled = True
+except:
+    print("Warning: Could not initialize MCP3008. Voltage readings disabled.")
+    voltage_sensor_enabled = False
 
 # Initialize pygame for joystick
 pygame.init()
@@ -71,7 +67,6 @@ pygame.joystick.init()
 if pygame.joystick.get_count() == 0:
     print("Error: No joystick/controller found.")
     GPIO.cleanup()
-    camera.release()
     pygame.quit()
     exit()
 
@@ -115,12 +110,17 @@ DEAD_ZONE = 0.15
 
 def read_voltage():
     """Read voltage from MCP3008 ADC"""
+    if not voltage_sensor_enabled:
+        return 0.0
+        
     # Assuming a voltage divider with R1=10k and R2=1k for readings up to 11V
-    # Scale the ADC reading (0-1) to voltage
-    raw_value = adc.value
-    # Calculate actual voltage based on your voltage divider
-    actual_voltage = raw_value * 11.0  # Adjust multiplier based on your setup
-    return actual_voltage
+    try:
+        raw_value = adc.value
+        # Calculate actual voltage based on your voltage divider
+        actual_voltage = raw_value * 11.0  # Adjust multiplier based on your setup
+        return actual_voltage
+    except:
+        return 0.0
 
 
 def set_speed(speed_level):
@@ -174,14 +174,6 @@ def toggle_recording():
     print(f"Recording {'started' if recording else 'stopped'}")
 
 
-def save_image(frame):
-    """Save camera frame to disk"""
-    global frame_counter
-    filename = os.path.join(IMAGE_DIR, f"{session_id}_{frame_counter:06d}.jpg")
-    cv2.imwrite(filename, frame)
-    return filename
-
-
 def save_voltage(voltage):
     """Save voltage reading to disk"""
     global frame_counter
@@ -205,7 +197,7 @@ def save_control_data(left_speed, right_speed):
 
 
 def record_data(left_speed, right_speed):
-    """Record a complete set of data (image, voltage, controls)"""
+    """Record control and voltage data (camera disabled)"""
     global frame_counter, last_record_time
 
     # Check if it's time to record
@@ -213,18 +205,12 @@ def record_data(left_speed, right_speed):
     if current_time - last_record_time < record_interval:
         return
 
-    # Capture frame
-    ret, frame = camera.read()
-    if not ret:
-        print("Error: Couldn't capture frame")
-        return
-
-    # Read voltage
+    # Read voltage if sensor is enabled
     voltage = read_voltage()
 
-    # Save all data
-    image_file = save_image(frame)
-    voltage_file = save_voltage(voltage)
+    # Save data
+    if voltage_sensor_enabled:
+        voltage_file = save_voltage(voltage)
     control_file = save_control_data(left_speed, right_speed)
 
     frame_counter += 1
@@ -232,7 +218,10 @@ def record_data(left_speed, right_speed):
 
     # Occasionally print status
     if frame_counter % 10 == 0:
-        print(f"Recorded frame #{frame_counter}, voltage: {voltage:.2f}V")
+        status = f"Recorded data #{frame_counter}"
+        if voltage_sensor_enabled:
+            status += f", voltage: {voltage:.2f}V"
+        print(status)
 
 
 def stop():
@@ -251,7 +240,6 @@ def cleanup():
     left_pwm.stop()
     right_pwm.stop()
     GPIO.cleanup()
-    camera.release()
     pygame.quit()
     print("Cleanup complete")
 
@@ -268,6 +256,8 @@ print("Left trigger: Decrease speed")
 print("A button: Toggle data recording")
 print("B button: Emergency stop")
 print("Back button: Exit program")
+print("\n")
+print("NOTE: Camera functionality is temporarily disabled")
 print("\n")
 
 try:

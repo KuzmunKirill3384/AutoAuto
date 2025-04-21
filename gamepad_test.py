@@ -78,8 +78,8 @@ print(f"Controller initialized: {joystick.get_name()}")
 # Default states and variables
 left_temp = 1
 right_temp = 1
-current_speed = 2  # Default to medium speed
-speed_map = {1: 25, 2: 50, 3: 75}  # Speed levels
+current_speed = 3  # Default to medium speed
+speed_map = {1: 25, 2: 50, 3: 100}  # Speed levels
 recording = False  # Flag to toggle data recording
 record_interval = 0.1  # Record data every 100ms
 last_record_time = 0

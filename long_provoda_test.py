@@ -25,9 +25,9 @@ for directory in [DATA_DIR, VOLTAGE_DIR, CONTROL_DIR, VIDEO_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-# GPIO pin setup
-left_in1, left_in2, left_en = 22, 5, 6
-right_in1, right_in2, right_en = 17, 27, 4
+# GPIO pin setup - Updated for your configuration
+left_in1, left_in2, left_en = 6, 5, 26  # Left motor
+right_in1, right_in2, right_en = 22, 27, 17  # Right motor
 
 # Initialize GPIO
 GPIO.setmode(GPIO.BCM)

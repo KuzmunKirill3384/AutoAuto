@@ -26,8 +26,8 @@ for directory in [DATA_DIR, VOLTAGE_DIR, CONTROL_DIR, VIDEO_DIR]:
         os.makedirs(directory)
 
 # GPIO pin setup
-left_in1, left_in2, left_en = 5, 22, 6
-right_in1, right_in2, right_en = 27, 17, 4
+left_in1, left_in2, left_en = 22, 5, 6
+right_in1, right_in2, right_en = 17, 27, 4
 
 # Initialize GPIO
 GPIO.setmode(GPIO.BCM)

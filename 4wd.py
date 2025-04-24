@@ -25,23 +25,24 @@ for directory in [DATA_DIR, VOLTAGE_DIR, CONTROL_DIR, VIDEO_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-# GPIO pin setup - Left side motors
-left_front_in1, left_front_in2, left_front_en = 24, 23, 25  # From gamepad_test_cross.py
-left_rear_in1, left_rear_in2, left_rear_en = 5, 22, 6     # From long_provoda_test.py
+# GPIO pin setup - CORRECTED
+# Rear axle
+rear_left_in1, rear_left_in2, rear_left_en = 24, 23, 25
+rear_right_in1, rear_right_in2, rear_right_en = 7, 8, 12
 
-# GPIO pin setup - Right side motors
-right_front_in1, right_front_in2, right_front_en = 7, 8, 12  # From gamepad_test_cross.py
-right_rear_in1, right_rear_in2, right_rear_en = 27, 17, 4    # From long_provoda_test.py
+# Front axle
+front_left_in1, front_left_in2, front_left_en = 5, 22, 6
+front_right_in1, front_right_in2, front_right_en = 27, 17, 4
 
 # Initialize GPIO
 GPIO.setmode(GPIO.BCM)
 
 # Setup motor pins
 motor_pins = [
-    left_front_in1, left_front_in2, left_front_en,
-    left_rear_in1, left_rear_in2, left_rear_en,
-    right_front_in1, right_front_in2, right_front_en,
-    right_rear_in1, right_rear_in2, right_rear_en
+    front_left_in1, front_left_in2, front_left_en,
+    front_right_in1, front_right_in2, front_right_en,
+    rear_left_in1, rear_left_in2, rear_left_en,
+    rear_right_in1, rear_right_in2, rear_right_en
 ]
 
 for pin in motor_pins:
@@ -49,16 +50,16 @@ for pin in motor_pins:
     GPIO.output(pin, GPIO.LOW)
 
 # Setup PWM
-left_front_pwm = GPIO.PWM(left_front_en, 1000)
-left_rear_pwm = GPIO.PWM(left_rear_en, 1000)
-right_front_pwm = GPIO.PWM(right_front_en, 1000)
-right_rear_pwm = GPIO.PWM(right_rear_en, 1000)
+front_left_pwm = GPIO.PWM(front_left_en, 1000)
+front_right_pwm = GPIO.PWM(front_right_en, 1000)
+rear_left_pwm = GPIO.PWM(rear_left_en, 1000)
+rear_right_pwm = GPIO.PWM(rear_right_en, 1000)
 
 # Start PWM at 25% duty cycle
-left_front_pwm.start(25)
-left_rear_pwm.start(25)
-right_front_pwm.start(25)
-right_rear_pwm.start(25)
+front_left_pwm.start(25)
+front_right_pwm.start(25)
+rear_left_pwm.start(25)
+rear_right_pwm.start(25)
 
 # Setup ADC
 try:
@@ -149,10 +150,10 @@ def set_speed(speed_level):
     global current_speed
     if speed_level in speed_map:
         duty_cycle = speed_map[speed_level]
-        left_front_pwm.ChangeDutyCycle(duty_cycle)
-        left_rear_pwm.ChangeDutyCycle(duty_cycle)
-        right_front_pwm.ChangeDutyCycle(duty_cycle)
-        right_rear_pwm.ChangeDutyCycle(duty_cycle)
+        front_left_pwm.ChangeDutyCycle(duty_cycle)
+        front_right_pwm.ChangeDutyCycle(duty_cycle)
+        rear_left_pwm.ChangeDutyCycle(duty_cycle)
+        rear_right_pwm.ChangeDutyCycle(duty_cycle)
         current_speed = speed_level
         print(f"Speed level: {speed_level} ({duty_cycle}%)")
 
@@ -160,27 +161,27 @@ def set_motor_speeds(left_speed, right_speed):
     left_duty = abs(left_speed) * speed_map[current_speed]
     right_duty = abs(right_speed) * speed_map[current_speed]
     
-    # Set left front motor direction
-    GPIO.output(left_front_in1, GPIO.HIGH if left_speed > 0 else GPIO.LOW)
-    GPIO.output(left_front_in2, GPIO.LOW if left_speed > 0 else GPIO.HIGH if left_speed < 0 else GPIO.LOW)
+    # Set front left motor direction
+    GPIO.output(front_left_in1, GPIO.HIGH if left_speed > 0 else GPIO.LOW)
+    GPIO.output(front_left_in2, GPIO.LOW if left_speed > 0 else GPIO.HIGH if left_speed < 0 else GPIO.LOW)
     
-    # Set left rear motor direction
-    GPIO.output(left_rear_in1, GPIO.HIGH if left_speed > 0 else GPIO.LOW)
-    GPIO.output(left_rear_in2, GPIO.LOW if left_speed > 0 else GPIO.HIGH if left_speed < 0 else GPIO.LOW)
+    # Set front right motor direction
+    GPIO.output(front_right_in1, GPIO.HIGH if right_speed > 0 else GPIO.LOW)
+    GPIO.output(front_right_in2, GPIO.LOW if right_speed > 0 else GPIO.HIGH if right_speed < 0 else GPIO.LOW)
     
-    # Set right front motor direction
-    GPIO.output(right_front_in1, GPIO.HIGH if right_speed > 0 else GPIO.LOW)
-    GPIO.output(right_front_in2, GPIO.LOW if right_speed > 0 else GPIO.HIGH if right_speed < 0 else GPIO.LOW)
+    # Set rear left motor direction
+    GPIO.output(rear_left_in1, GPIO.HIGH if left_speed > 0 else GPIO.LOW)
+    GPIO.output(rear_left_in2, GPIO.LOW if left_speed > 0 else GPIO.HIGH if left_speed < 0 else GPIO.LOW)
     
-    # Set right rear motor direction
-    GPIO.output(right_rear_in1, GPIO.HIGH if right_speed > 0 else GPIO.LOW)
-    GPIO.output(right_rear_in2, GPIO.LOW if right_speed > 0 else GPIO.HIGH if right_speed < 0 else GPIO.LOW)
+    # Set rear right motor direction
+    GPIO.output(rear_right_in1, GPIO.HIGH if right_speed > 0 else GPIO.LOW)
+    GPIO.output(rear_right_in2, GPIO.LOW if right_speed > 0 else GPIO.HIGH if right_speed < 0 else GPIO.LOW)
     
     # Apply PWM duty cycle
-    left_front_pwm.ChangeDutyCycle(left_duty)
-    left_rear_pwm.ChangeDutyCycle(left_duty)
-    right_front_pwm.ChangeDutyCycle(right_duty)
-    right_rear_pwm.ChangeDutyCycle(right_duty)
+    front_left_pwm.ChangeDutyCycle(left_duty)
+    front_right_pwm.ChangeDutyCycle(right_duty)
+    rear_left_pwm.ChangeDutyCycle(left_duty)
+    rear_right_pwm.ChangeDutyCycle(right_duty)
 
 def toggle_recording():
     global recording, video_recording
@@ -232,10 +233,10 @@ def record_data(left_speed, right_speed):
 
 def stop():
     all_in_pins = [
-        left_front_in1, left_front_in2,
-        left_rear_in1, left_rear_in2,
-        right_front_in1, right_front_in2,
-        right_rear_in1, right_rear_in2
+        front_left_in1, front_left_in2,
+        front_right_in1, front_right_in2,
+        rear_left_in1, rear_left_in2,
+        rear_right_in1, rear_right_in2
     ]
     for pin in all_in_pins:
         GPIO.output(pin, GPIO.LOW)
@@ -246,10 +247,10 @@ def cleanup():
     stop()
     
     # Stop all PWMs
-    left_front_pwm.stop()
-    left_rear_pwm.stop()
-    right_front_pwm.stop()
-    right_rear_pwm.stop()
+    front_left_pwm.stop()
+    front_right_pwm.stop()
+    rear_left_pwm.stop()
+    rear_right_pwm.stop()
     
     # Handle camera
     if camera_enabled and video_recording:

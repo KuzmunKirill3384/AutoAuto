@@ -69,11 +69,8 @@ _capture_frame: Callable[[], Optional["numpy.ndarray"]]
 
 if _CAM_BACKEND == "picamera2":
     picam = Picamera2()
-    import libcamera
-    xform = libcamera.Transform(hflip=True, vflip=True)     
-    picam.configure(picam.create_video_configuration(
-        main={"size": (640, 480), "format": "RGB888"},
-        transform=xform))
+    picam.configure(picam.create_video_configuration(main={"size": (640, 480), "format": "RGB888"}))
+    picam.start()
 
     def _capture_picam() -> Optional["numpy.ndarray"]:
         try:
@@ -256,4 +253,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() "

@@ -154,7 +154,7 @@ def turn_left():
     GPIO.output(rear_left_in1, GPIO.HIGH)
     GPIO.output(rear_left_in2, GPIO.LOW)  # Changed to backward
     GPIO.output(rear_right_in1, GPIO.LOW)
-    GPIO.output(rear_right_in2, GPIO.HIGh)
+    GPIO.output(rear_right_in2, GPIO.HIGH)
     
     print("Turning left")
 

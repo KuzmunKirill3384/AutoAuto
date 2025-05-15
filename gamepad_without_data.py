@@ -12,13 +12,13 @@ front_right_in2 = 26
 front_right_en = 19
 
 # Rear wheels GPIO pins
-rear_left_in1 = 24
-rear_left_in2 = 23
-rear_left_en = 25
+rear_right_in1 = 24 
+rear_right_in2 = 23
+rear_right_en = 25
 
-rear_right_in1 = 7
-rear_right_in2 = 8
-rear_right_en = 12
+rear_left_in1 = 7
+rear_left_in2 = 8
+rear_left_en = 12
 
 # Initialize GPIO
 GPIO.setmode(GPIO.BCM)

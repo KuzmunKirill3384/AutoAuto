@@ -151,10 +151,10 @@ def turn_left():
     GPIO.output(front_right_in2, GPIO.LOW)
     
     # Rear wheels
-    GPIO.output(rear_left_in1, GPIO.LOW)
-    GPIO.output(rear_left_in2, GPIO.HIGH)  # Changed to backward
-    GPIO.output(rear_right_in1, GPIO.HIGH)
-    GPIO.output(rear_right_in2, GPIO.LOW)
+    GPIO.output(rear_left_in1, GPIO.HIGH)
+    GPIO.output(rear_left_in2, GPIO.LOW)  # Changed to backward
+    GPIO.output(rear_right_in1, GPIO.LOW)
+    GPIO.output(rear_right_in2, GPIO.HIGh)
     
     print("Turning left")
 
@@ -168,10 +168,10 @@ def turn_right():
     GPIO.output(front_right_in2, GPIO.HIGH)  # Changed to backward
     
     # Rear wheels
-    GPIO.output(rear_left_in1, GPIO.HIGH)
-    GPIO.output(rear_left_in2, GPIO.LOW)
-    GPIO.output(rear_right_in1, GPIO.LOW)
-    GPIO.output(rear_right_in2, GPIO.HIGH)  # Changed to backward
+    GPIO.output(rear_left_in1, GPIO.LOW)
+    GPIO.output(rear_left_in2, GPIO.HIGH)
+    GPIO.output(rear_right_in1, GPIO.HIGH)
+    GPIO.output(rear_right_in2, GPIO.LOW)  # Changed to backward
     
     print("Turning right")
    

@@ -166,6 +166,11 @@ def rotate_right():
 # ───────────────────────── main loop ──────────────────────────────────
 
 def main():
+    # ensure pygame subsystems are initialised *inside* main so we avoid
+    # "joystick system not initialized" errors when the module reloads
+    pygame.init()
+    pygame.joystick.init()
+
     if pygame.joystick.get_count() == 0:
         print("No gamepad detected – exiting")
         return

@@ -71,7 +71,7 @@ current_speed = 25  # PWM duty cycle
 def set_speed(speed):
     """Set speed for all motors"""
     global speed_level, current_speed
-    
+
     if speed == 1:  # low
         duty_cycle = 25
     elif speed == 2:  # medium
@@ -80,16 +80,29 @@ def set_speed(speed):
         duty_cycle = 75
     else:
         return
-    
+
     speed_level = speed
     current_speed = duty_cycle
-    
+
     front_left_pwm.ChangeDutyCycle(duty_cycle)
     front_right_pwm.ChangeDutyCycle(duty_cycle)
     rear_left_pwm.ChangeDutyCycle(duty_cycle)
     rear_right_pwm.ChangeDutyCycle(duty_cycle)
     print(f"Speed set to {'low' if speed == 1 else 'medium' if speed == 2 else 'high'}")
 
+def stop():
+    """Stop all wheels"""
+    # Front wheels
+    GPIO.output(front_left_in1, GPIO.LOW)
+    GPIO.output(front_left_in2, GPIO.LOW)
+    GPIO.output(front_right_in1, GPIO.LOW)
+    GPIO.output(front_right_in2, GPIO.LOW)
+
+    # Rear wheels
+    GPIO.output(rear_left_in1, GPIO.LOW)
+    GPIO.output(rear_left_in2, GPIO.LOW)
+    GPIO.output(rear_right_in1, GPIO.LOW)
+    GPIO.output(rear_right_in2, GPIO.LOW)
 
 def forward():
     """Move all wheels forward"""
@@ -98,13 +111,13 @@ def forward():
     GPIO.output(front_left_in2, GPIO.LOW)
     GPIO.output(front_right_in1, GPIO.HIGH)
     GPIO.output(front_right_in2, GPIO.LOW)
-    
+
     # Rear wheels
     GPIO.output(rear_left_in1, GPIO.HIGH)
     GPIO.output(rear_left_in2, GPIO.LOW)
     GPIO.output(rear_right_in1, GPIO.HIGH)
     GPIO.output(rear_right_in2, GPIO.LOW)
-    
+
     print("Moving forward")
 
 
@@ -115,67 +128,14 @@ def backward():
     GPIO.output(front_left_in2, GPIO.HIGH)
     GPIO.output(front_right_in1, GPIO.LOW)
     GPIO.output(front_right_in2, GPIO.HIGH)
-    
+
     # Rear wheels
     GPIO.output(rear_left_in1, GPIO.LOW)
     GPIO.output(rear_left_in2, GPIO.HIGH)
     GPIO.output(rear_right_in1, GPIO.LOW)
     GPIO.output(rear_right_in2, GPIO.HIGH)
-    
+
     print("Moving backward")
-
-
-def stop():
-    """Stop all wheels"""
-    # Front wheels
-    GPIO.output(front_left_in1, GPIO.LOW)
-    GPIO.output(front_left_in2, GPIO.LOW)
-    GPIO.output(front_right_in1, GPIO.LOW)
-    GPIO.output(front_right_in2, GPIO.LOW)
-    
-    # Rear wheels
-    GPIO.output(rear_left_in1, GPIO.LOW)
-    GPIO.output(rear_left_in2, GPIO.LOW)
-    GPIO.output(rear_right_in1, GPIO.LOW)
-    GPIO.output(rear_right_in2, GPIO.LOW)
-    
-    print("Stopped")
-
-
-def turn_left():
-    """Turn left (right wheels forward, left wheels backward)"""
-    # Front wheels
-    GPIO.output(front_left_in1, GPIO.LOW)
-    GPIO.output(front_left_in2, GPIO.HIGH)  # Changed to backward
-    GPIO.output(front_right_in1, GPIO.HIGH)
-    GPIO.output(front_right_in2, GPIO.LOW)
-    
-    # Rear wheels
-    GPIO.output(rear_left_in1, GPIO.HIGH)
-    GPIO.output(rear_left_in2, GPIO.LOW)  # Changed to backward
-    GPIO.output(rear_right_in1, GPIO.LOW)
-    GPIO.output(rear_right_in2, GPIO.HIGH)
-    
-    print("Turning left")
-
-
-def turn_right():
-    """Turn right (left wheels forward, right wheels backward)"""
-    # Front wheels
-    GPIO.output(front_left_in1, GPIO.HIGH)
-    GPIO.output(front_left_in2, GPIO.LOW)
-    GPIO.output(front_right_in1, GPIO.LOW)
-    GPIO.output(front_right_in2, GPIO.HIGH)  # Changed to backward
-    
-    # Rear wheels
-    GPIO.output(rear_left_in1, GPIO.LOW)
-    GPIO.output(rear_left_in2, GPIO.HIGH)
-    GPIO.output(rear_right_in1, GPIO.HIGH)
-    GPIO.output(rear_right_in2, GPIO.LOW)  # Changed to backward
-    
-    print("Turning right")
-   
-
 
 def rotate_left():
     """Rotate left (right wheels forward, left wheels backward)"""
@@ -184,13 +144,13 @@ def rotate_left():
     GPIO.output(front_left_in2, GPIO.HIGH)
     GPIO.output(front_right_in1, GPIO.HIGH)
     GPIO.output(front_right_in2, GPIO.LOW)
-    
+
     # Rear wheels
     GPIO.output(rear_left_in1, GPIO.LOW)
     GPIO.output(rear_left_in2, GPIO.HIGH)
     GPIO.output(rear_right_in1, GPIO.HIGH)
     GPIO.output(rear_right_in2, GPIO.LOW)
-    
+
     print("Rotating left")
 
 
@@ -201,13 +161,13 @@ def rotate_right():
     GPIO.output(front_left_in2, GPIO.LOW)
     GPIO.output(front_right_in1, GPIO.LOW)
     GPIO.output(front_right_in2, GPIO.HIGH)
-    
+
     # Rear wheels
     GPIO.output(rear_left_in1, GPIO.HIGH)
     GPIO.output(rear_left_in2, GPIO.LOW)
     GPIO.output(rear_right_in1, GPIO.LOW)
     GPIO.output(rear_right_in2, GPIO.HIGH)
-    
+
     print("Rotating right")
 
 
@@ -215,18 +175,18 @@ def handle_joystick_movement(x_axis, y_axis):
     """Handle joystick movement for robot control"""
     # Introduce deadzone to prevent minor joystick movements
     deadzone = 0.2
-    
+
     if abs(x_axis) < deadzone and abs(y_axis) < deadzone:
         stop()
         return
-    
+
     # Forward/backward control (y-axis)
     if y_axis < -deadzone:  # Push up on stick
         if abs(x_axis) > deadzone:
             if x_axis < 0:  # Push left
-                turn_left()
+                pass
             else:  # Push right
-                turn_right()
+                pass
         else:
             forward()
     elif y_axis > deadzone:  # Push down on stick
@@ -262,7 +222,7 @@ def print_instructions():
 try:
     # Check for joysticks
     joystick_count = pygame.joystick.get_count()
-    
+
     if joystick_count == 0:
         print("No gamepad detected. Please connect a gamepad and restart.")
         # Fall back to keyboard control
@@ -277,32 +237,28 @@ try:
         print("1 - low speed  2 - medium speed  3 - high speed")
         print("x - exit")
         print("\n")
-        
+
         keyboard_mode = True
     else:
         # Use the first joystick
         joystick = pygame.joystick.Joystick(0)
         joystick.init()
-        
+
         print(f"Detected gamepad: {joystick.get_name()}")
         print_instructions()
         keyboard_mode = False
-    
+
     running = True
-    
+
     while running:
         if keyboard_mode:
             # Keyboard control
             x = input().lower()
-            
+
             if x == 'w':
                 forward()
             elif x == 's':
                 stop()
-            elif x == 'a':
-                turn_left()
-            elif x == 'd':
-                turn_right()
             elif x == 'q':
                 rotate_left()
             elif x == 'e':
@@ -334,14 +290,14 @@ try:
                     elif event.button == 7:  # Start button (usually)
                         print("Exiting...")
                         running = False
-            
+
             if joystick_count > 0 and running:
                 # Read left analog stick
                 x_axis = joystick.get_axis(0)  # Left/Right
                 y_axis = joystick.get_axis(1)  # Up/Down
-                
+
                 handle_joystick_movement(x_axis, y_axis)
-            
+
             # Small delay to prevent CPU overuse
             sleep(0.1)
 
@@ -355,7 +311,7 @@ finally:
     # Cleanup
     if 'pygame' in locals() or 'pygame' in globals():
         pygame.quit()
-    
+
     # Cleanup GPIO
     front_left_pwm.stop()
     front_right_pwm.stop()

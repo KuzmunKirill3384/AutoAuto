@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-
+"""
+Four‑wheel robot control on Raspberry Pi.
+Adds camera capture & logging with preferred Raspberry Pi library (picamera2),
+falling back to OpenCV when Pi‑camera unavailable.
+Saved frames + labels → dataset/ for later neural‑net training.
+"""
 
 import os
 import sys
@@ -195,24 +200,31 @@ def handle_joystick_movement(x_axis: float, y_axis: float):
 def main():
     joystick_count = pygame.joystick.get_count()
     keyboard_mode = joystick_count == 0
+
     if keyboard_mode:
-        print("Keyboard mode – logging active")
+        print("Keyboard mode – press w/a/s/d/z for movement, x to exit")
+        print("(If script runs non‑interactively, keep the window focused and use arrow keys)")
     else:
-        joystick = pygame.joystick.Joystick(0); joystick.init()
+        joystick = pygame.joystick.Joystick(0)
+        joystick.init()
         print(f"Detected gamepad: {joystick.get_name()}")
 
     running = True
     try:
         while running:
             if keyboard_mode:
-                cmd = input().lower()
-                if cmd == 'w': forward()
-                elif cmd == 's': stop()
-                elif cmd == 'a': rotate_left()
-                elif cmd == 'd': rotate_right()
-                elif cmd == 'z': backward()
-                elif cmd in {'1','2','3'}: set_speed(int(cmd))
-                elif cmd == 'x': running = False
+                # Poll pygame keyboard to avoid blocking input() (which raises EOFError in non‑TTY runs)
+                pygame.event.pump()
+                kstate = pygame.key.get_pressed()
+                if kstate[pygame.K_w]: forward()
+                elif kstate[pygame.K_s]: stop()
+                elif kstate[pygame.K_a]: rotate_left()
+                elif kstate[pygame.K_d]: rotate_right()
+                elif kstate[pygame.K_z]: backward()
+                elif kstate[pygame.K_1]: set_speed(1)
+                elif kstate[pygame.K_2]: set_speed(2)
+                elif kstate[pygame.K_3]: set_speed(3)
+                elif kstate[pygame.K_x]: running = False
             else:
                 for event in pygame.event.get():
                     if event.type == pygame.JOYBUTTONDOWN:
@@ -231,7 +243,7 @@ def main():
     finally:
         if _CAM_BACKEND == "picamera2":
             picam.stop()
-        elif _CAM_BACKEND == "opencv" and 'camera' in locals():
+        elif _CAM_BACKEND == "opencv" and 'camera' in globals():
             camera.release()
         pygame.quit()
         for pwm in (front_left_pwm, front_right_pwm, rear_left_pwm, rear_right_pwm):
@@ -240,4 +252,5 @@ def main():
         print("Shutdown complete – dataset saved to", DATASET_DIR)
 
 
-if __name__ == "
+if __name__ == "__main__":
+    main() "

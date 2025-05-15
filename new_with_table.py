@@ -137,14 +137,14 @@ while running:
     x = js.get_axis(0)
     y = js.get_axis(1)
 
-    if y < -deadzone:
-        forward()
-    elif y > deadzone:
-        backward()
-    elif x < -deadzone:
+    if x < -deadzone:
         rotate_left()
     elif x > deadzone:
         rotate_right()
+    elif y < -deadzone:
+        forward()
+    elif y > deadzone:
+        backward()
     else:
         stop()
 

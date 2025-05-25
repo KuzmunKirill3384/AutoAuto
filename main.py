@@ -2,7 +2,6 @@
 """
 Four-wheel robot controller for Raspberry Pi.
 Uses gamepad (pygame) for driving and Picamera2/OpenCV for optional dataset logging.
-**Keyboard control removed** – script requires a connected joystick/gamepad.
 """
 import os
 import sys
@@ -93,6 +92,7 @@ if _CAM_BACKEND == "none":
     print("Camera disabled")
 
 # ───────────────────────── helpers ───────────────────────────────────
+
 def _apply_pwm(dc: int):
     for pwm in (front_left_pwm, front_right_pwm, rear_left_pwm, rear_right_pwm):
         pwm.ChangeDutyCycle(dc)
@@ -179,7 +179,11 @@ def main():
     if pygame.joystick.get_count() == 0:
         print("No gamepad detected – exiting")
         return
-    joystick = pygame.joystick.Joystick(0); joystick.init()
+    joystick = pygame.joystick.Joystick(0)
+    joystick.init()
+    # Flush any initial button events (e.g., GUIDE button) to avoid accidental exit
+    pygame.event.clear()
+
     print("Gamepad:", joystick.get_name())
 
     running = True
@@ -187,11 +191,16 @@ def main():
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.JOYBUTTONDOWN:
-                    if event.button == 0: set_speed(1)
-                    elif event.button == 1: set_speed(2)
-                    elif event.button == 2: set_speed(3)
-                    elif event.button == 3: toggle_logging()  # toggle camera logging
-                    elif event.button == 7: running = False
+                    if event.button == 0:
+                        set_speed(1)
+                    elif event.button == 1:
+                        set_speed(2)
+                    elif event.button == 2:
+                        set_speed(3)
+                    elif event.button == 3:
+                        toggle_logging()
+                    elif event.button == 7:
+                        running = False
             if not running:
                 break
 
@@ -199,10 +208,14 @@ def main():
             y_axis = joystick.get_axis(1)
             if abs(x_axis) < 0.2 and abs(y_axis) < 0.2:
                 stop()
-            elif y_axis < -0.2: forward()
-            elif y_axis > 0.2: backward()
-            elif x_axis < -0.2: rotate_left()
-            elif x_axis > 0.2: rotate_right()
+            elif y_axis < -0.2:
+                forward()
+            elif y_axis > 0.2:
+                backward()
+            elif x_axis < -0.2:
+                rotate_left()
+            elif x_axis > 0.2:
+                rotate_right()
 
             _maybe_log()
             sleep(0.05)

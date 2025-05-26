@@ -31,7 +31,7 @@ REAR_RIGHT_IN1,  REAR_RIGHT_IN2,  REAR_RIGHT_EN  = 24, 23, 25
 REAR_LEFT_IN1,   REAR_LEFT_IN2,   REAR_LEFT_EN   = 7,  8,  12
 
 PWM_FREQ_HZ = 1000   # Гц
-SPEED       = 30     # % duty-cycle
+SPEED       = 60    # % duty-cycle
 
 # ─── модель и инференс ────────────────────────────────────
 MODEL_PATH   = Path("robot_action_cnn_2.pth")   # веса 3-классовой модели

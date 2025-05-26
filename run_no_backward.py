@@ -1,139 +1,136 @@
 #!/usr/bin/env python3
 """
-Autonomous 4-wheel robot (Picamera2) — только вперёд и повороты.
+Autonomous 4-wheel robot (Picamera2)
 
-Использует TorchScript-модель (3 класса):
-    • forward
-    • rotate_left
-    • rotate_right
+• Модель MobileNetV3-Small с 3 выходами: forward, rotate_left, rotate_right
+• Каждые 0.01 с берёт кадр 640×480 → 128×96, нормализует,
+  предсказывает действие и подаёт команды на GPIO.
+
+Файл весов должен быть обучён именно на 3-классовую задачу!
 """
 
 from __future__ import annotations
 import sys, time, argparse
 from pathlib import Path
-from typing import Callable
 
 import RPi.GPIO as GPIO
-import torch
-from torchvision import transforms
+import torch, torch.nn as nn
+from torchvision import transforms, models
 from PIL import Image
 
 # ─── Picamera2 ─────────────────────────────────────────────
 try:
     from picamera2 import Picamera2
 except ImportError:
-    sys.exit("Picamera2 не установлена: sudo apt install python3-picamera2")
+    sys.exit("sudo apt install python3-picamera2")
 
-# ─── GPIO pin-map (из «рабочего» скрипта) ─────────────────
-FL_IN1, FL_IN2, FL_EN = 20, 21, 16
-FR_IN1, FR_IN2, FR_EN = 13, 26, 19
-RR_IN1, RR_IN2, RR_EN = 24, 23, 25
-RL_IN1, RL_IN2, RL_EN = 7,  8,  12
-PWM_FREQ_HZ, SPEED = 1000, 30      # %
+# ─── GPIO pin-map (как в рабочем 4-классовом скрипте) ─────
+FRONT_LEFT_IN1,  FRONT_LEFT_IN2,  FRONT_LEFT_EN  = 20, 21, 16
+FRONT_RIGHT_IN1, FRONT_RIGHT_IN2, FRONT_RIGHT_EN = 13, 26, 19
+REAR_RIGHT_IN1,  REAR_RIGHT_IN2,  REAR_RIGHT_EN  = 24, 23, 25
+REAR_LEFT_IN1,   REAR_LEFT_IN2,   REAR_LEFT_EN   = 7,  8,  12
+
+PWM_FREQ_HZ = 1000   # Гц
+SPEED       = 30     # % duty-cycle
 
 # ─── модель и инференс ────────────────────────────────────
-SCRIPT_PATH  = Path("robot_action_cnn_script.pt")   # TorchScript (3 класса)
-IMG_SIZE     = (96, 128)                            # H×W
+MODEL_PATH   = Path("robot_action_cnn_2.pth")   # веса 3-классовой модели
+IMG_SIZE     = (96, 128)            # H×W
 ACTIONS      = ["forward", "rotate_left", "rotate_right"]
-FRAME_PERIOD = 0.01                                 # c
+FRAME_PERIOD = 0.01                 # ≈100 FPS
 
 # ─── GPIO init ────────────────────────────────────────────
-GPIO.setmode(GPIO.BCM)
-GPIO.setwarnings(False)
-def _setup_motor(in1: int, in2: int, en: int):
+GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
+def _setup_motor(in1, in2, en):
     GPIO.setup(in1, GPIO.OUT); GPIO.setup(in2, GPIO.OUT); GPIO.setup(en, GPIO.OUT)
     GPIO.output(in1, GPIO.LOW); GPIO.output(in2, GPIO.LOW)
     pwm = GPIO.PWM(en, PWM_FREQ_HZ); pwm.start(SPEED)
     return pwm
-for pins in ((FL_IN1, FL_IN2, FL_EN), (FR_IN1, FR_IN2, FR_EN),
-             (RL_IN1, RL_IN2, RL_EN), (RR_IN1, RR_IN2, RR_EN)):
-    _setup_motor(*pins)
 
-# ─── движения (идентично «рабочему» скрипту) ──────────────
+# инициализируем все 4 драйвера
+front_left_pwm  = _setup_motor(FRONT_LEFT_IN1,  FRONT_LEFT_IN2,  FRONT_LEFT_EN)
+front_right_pwm = _setup_motor(FRONT_RIGHT_IN1, FRONT_RIGHT_IN2, FRONT_RIGHT_EN)
+rear_left_pwm   = _setup_motor(REAR_LEFT_IN1,   REAR_LEFT_IN2,   REAR_LEFT_EN)
+rear_right_pwm  = _setup_motor(REAR_RIGHT_IN1,  REAR_RIGHT_IN2,  REAR_RIGHT_EN)
+
+
+# ─── движения (идентичны «рабочему» скрипту) ─────────────
 def _all_low():
-    for pin in (FL_IN1, FL_IN2, FR_IN1, FR_IN2,
-                RL_IN1, RL_IN2, RR_IN1, RR_IN2):
+    for pin in (
+        FRONT_LEFT_IN1,  FRONT_LEFT_IN2,
+        FRONT_RIGHT_IN1, FRONT_RIGHT_IN2,
+        REAR_LEFT_IN1,   REAR_LEFT_IN2,
+        REAR_RIGHT_IN1,  REAR_RIGHT_IN2
+    ):
         GPIO.output(pin, GPIO.LOW)
+
+def stop():         _all_low()
 
 def forward():
     _all_low()
-    GPIO.output(FL_IN1, GPIO.HIGH); GPIO.output(RL_IN1, GPIO.HIGH)
-    GPIO.output(FR_IN1, GPIO.HIGH); GPIO.output(RR_IN1, GPIO.HIGH)
+    GPIO.output(FRONT_LEFT_IN1,  GPIO.HIGH); GPIO.output(REAR_LEFT_IN1,  GPIO.HIGH)
+    GPIO.output(FRONT_RIGHT_IN1, GPIO.HIGH); GPIO.output(REAR_RIGHT_IN1, GPIO.HIGH)
 
 def rotate_left():
     _all_low()
-    GPIO.output(FR_IN1, GPIO.HIGH); GPIO.output(RR_IN1, GPIO.HIGH)
-    GPIO.output(FL_IN2, GPIO.HIGH); GPIO.output(RL_IN2, GPIO.HIGH)
+    GPIO.output(FRONT_RIGHT_IN1, GPIO.HIGH); GPIO.output(REAR_RIGHT_IN1, GPIO.HIGH)
+    GPIO.output(FRONT_LEFT_IN2,  GPIO.HIGH); GPIO.output(REAR_LEFT_IN2,  GPIO.HIGH)
 
 def rotate_right():
     _all_low()
-    GPIO.output(FL_IN1, GPIO.HIGH); GPIO.output(RL_IN1, GPIO.HIGH)
-    GPIO.output(FR_IN2, GPIO.HIGH); GPIO.output(RR_IN2, GPIO.HIGH)
+    GPIO.output(FRONT_LEFT_IN1,  GPIO.HIGH); GPIO.output(REAR_LEFT_IN1,  GPIO.HIGH)
+    GPIO.output(FRONT_RIGHT_IN2, GPIO.HIGH); GPIO.output(REAR_RIGHT_IN2, GPIO.HIGH)
 
-def stop():
-    _all_low()
+# ─── модель ───────────────────────────────────────────────
+def build_model():
+    net = models.mobilenet_v3_small(weights=None, width_mult=1.0)
+    net.classifier[3] = nn.Linear(net.classifier[3].in_features, len(ACTIONS))
+    return net
 
 # ─── MAIN ─────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--preview", action="store_true",
-                        help="Показ кадра и предсказания (нужен X-server)")
+    parser.add_argument("--preview", action="store_true", help="Показ кадра (нужен X11)")
     args = parser.parse_args()
 
-    if not SCRIPT_PATH.exists():
-        sys.exit(f"{SCRIPT_PATH} не найден — сначала сохраните TorchScript.")
+    if not MODEL_PATH.exists():
+        sys.exit(f"{MODEL_PATH} не найден – обучите/скопируйте веса для 3 классов.")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # ── загружаем TorchScript ──────────────────────────────
-    try:
-        model: torch.jit.ScriptModule = torch.jit.load(str(SCRIPT_PATH),
-                                                       map_location=device)
-    except Exception as e:
-        sys.exit(f"Не удалось открыть TorchScript: {e}")
+    model  = build_model().to(device)
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
     model.eval()
 
-    # ── проверяем число выходов (прогон dummy-тензора) ────
-    with torch.no_grad():
-        out_shape = model(torch.zeros(1, 3, *IMG_SIZE, device=device)).shape
-    if out_shape[1] != 3:
-        sys.exit(f"⚠ TorchScript имеет {out_shape[1]} классов, а нужно 3 "
-                 f"(forward / rotate_left / rotate_right). "
-                 f"Пересохраните модель.")
-
     tfms = transforms.Compose([
-        transforms.Resize(IMG_SIZE[::-1]),  # torchvision ждёт (W,H)
+        transforms.Resize(IMG_SIZE[::-1]),   # (W, H)
         transforms.ToTensor(),
-        transforms.Normalize((.5, .5, .5), (.5, .5, .5)),
+        transforms.Normalize((.5,.5,.5), (.5,.5,.5)),
     ])
 
     cam = Picamera2()
     cam.configure(cam.create_video_configuration(
         main={"size": (640, 480), "format": "RGB888"}))
-    cam.start(); capture: Callable[[], "np.ndarray"] = lambda: cam.capture_array()
+    cam.start();  capture = lambda: cam.capture_array()
 
     last = 0.0
     try:
         while True:
-            if time.time() - last < FRAME_PERIOD:
+            now = time.time()
+            if now - last < FRAME_PERIOD:
                 continue
-            last = time.time()
+            last = now
 
             frame = capture()
-            inp = tfms(Image.fromarray(frame)).unsqueeze(0).to(device)
+            inp   = tfms(Image.fromarray(frame)).unsqueeze(0).to(device)
 
             with torch.no_grad():
-                idx = int(model(inp).argmax(1))
-
-            # safety-guard (Idx должно быть 0..2)
-            action = ACTIONS[idx] if idx < len(ACTIONS) else "stop"
+                action = ACTIONS[int(model(inp).argmax(1))]
 
             {
                 "forward":      forward,
                 "rotate_left":  rotate_left,
-                "rotate_right": rotate_right,
-                "stop":         stop
-            }[action]()
+                "rotate_right": rotate_right
+            }.get(action, stop)()
 
             print(action)
             if args.preview:
@@ -141,7 +138,7 @@ def main():
                 plt.imshow(frame); plt.title(action); plt.pause(0.001); plt.clf()
     finally:
         cam.stop()
-        stop()
+        _all_low()
         GPIO.cleanup()
         print("Exit")
 

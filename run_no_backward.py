@@ -34,7 +34,7 @@ PWM_FREQ_HZ = 1000   # Гц
 SPEED       = 30     # % duty-cycle
 
 # ─── модель и инференс ────────────────────────────────────
-MODEL_PATH   = Path("robot_action_cnn.pth")   # веса 3-классовой модели
+MODEL_PATH   = Path("robot_action_cnn_2.pth")   # веса 3-классовой модели
 IMG_SIZE     = (96, 128)            # H×W
 ACTIONS      = ["forward", "rotate_left", "rotate_right"]
 FRAME_PERIOD = 0.01                 # ≈100 FPS

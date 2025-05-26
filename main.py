@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Four-wheel robot controller for Raspberry Pi.
-Uses gamepad (pygame) for driving and Picamera2/OpenCV for optional dataset logging.
-"""
+
 import os
 import sys
 import time
@@ -32,8 +29,9 @@ REAR_RIGHT_IN1, REAR_RIGHT_IN2, REAR_RIGHT_EN   = 24, 23, 25
 REAR_LEFT_IN1,  REAR_LEFT_IN2,  REAR_LEFT_EN    = 7,  8,  12
 PWM_FREQ_HZ = 1000
 
-# Increase photo frequency (seconds)
-FRAME_SAVE_PERIOD = 0.2  # was 0.5
+# ───────────────────────── frame logging ───────────────────────────────
+# Log as fast as possible; actual rate limited by camera & CPU
+FRAME_SAVE_PERIOD = 0.05  # seconds (unused in _maybe_log, kept for reference)
 
 SPEED_PRESETS = {1: 25, 2: 50, 3: 75}
 
@@ -42,24 +40,24 @@ LABELS_CSV = DATASET_DIR / "labels.csv"
 
 current_speed_level: int = 1
 current_action: Optional[str] = None
-_last_frame: float = 0.0
-logging_enabled: bool = False  # flag for dataset logging
+logging_enabled: bool = False  # dataset logging flag
 
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 
+# ───────────────────────── motor setup ─────────────────────────────────
 def _setup_motor(in1: int, in2: int, en: int):
     GPIO.setup(in1, GPIO.OUT); GPIO.setup(in2, GPIO.OUT); GPIO.setup(en, GPIO.OUT)
     GPIO.output(in1, GPIO.LOW); GPIO.output(in2, GPIO.LOW)
     pwm = GPIO.PWM(en, PWM_FREQ_HZ); pwm.start(SPEED_PRESETS[current_speed_level])
     return pwm
 
-front_left_pwm  = _setup_motor(FRONT_LEFT_IN1, FRONT_LEFT_IN2, FRONT_LEFT_EN)
+front_left_pwm  = _setup_motor(FRONT_LEFT_IN1,  FRONT_LEFT_IN2,  FRONT_LEFT_EN)
 front_right_pwm = _setup_motor(FRONT_RIGHT_IN1, FRONT_RIGHT_IN2, FRONT_RIGHT_EN)
-rear_left_pwm   = _setup_motor(REAR_LEFT_IN1,  REAR_LEFT_IN2,  REAR_LEFT_EN)
-rear_right_pwm  = _setup_motor(REAR_RIGHT_IN1, REAR_RIGHT_IN2, REAR_RIGHT_EN)
+rear_left_pwm   = _setup_motor(REAR_LEFT_IN1,   REAR_LEFT_IN2,   REAR_LEFT_EN)
+rear_right_pwm  = _setup_motor(REAR_RIGHT_IN1,  REAR_RIGHT_IN2,  REAR_RIGHT_EN)
 
-# ───────────────────────── camera init ───────────────────────────────
+# ───────────────────────── camera init ─────────────────────────────────
 CaptureFunc = Callable[[], Optional["numpy.ndarray"]]
 _capture_frame: CaptureFunc
 
@@ -75,6 +73,7 @@ if _CAM_BACKEND == "picamera2":
             return None
     _capture_frame = _capture_picam
     print("Camera backend: picamera2")
+
 elif _CAM_BACKEND == "opencv":
     camera = cv2.VideoCapture(0)  # type: ignore
     if camera.isOpened():
@@ -92,7 +91,6 @@ if _CAM_BACKEND == "none":
     print("Camera disabled")
 
 # ───────────────────────── helpers ───────────────────────────────────
-
 def _apply_pwm(dc: int):
     for pwm in (front_left_pwm, front_right_pwm, rear_left_pwm, rear_right_pwm):
         pwm.ChangeDutyCycle(dc)
@@ -104,30 +102,27 @@ def set_speed(level: int):
         _apply_pwm(SPEED_PRESETS[level])
         print("Speed →", level)
 
-
 def _save_frame(frame, action: str):
     import cv2 as _cv2
-    ts = int(time.time()*1000)
+    ts = int(time.time() * 1000)
     fname = f"{ts}_{action}_{current_speed_level}.jpg"
     _cv2.imwrite(str(DATASET_DIR / fname), frame)
     with LABELS_CSV.open("a") as fp:
         print(f"{fname},{action},{current_speed_level},{ts}", file=fp)
 
-
 def _maybe_log():
-    global _last_frame
+    """Save every captured frame when logging is enabled."""
     if not logging_enabled or current_action is None:
         return
     frame = _capture_frame()
-    now = time.time()
-    if frame is not None and now - _last_frame >= FRAME_SAVE_PERIOD:
+    if frame is not None:
         _save_frame(frame, current_action)
-        _last_frame = now
-
 
 def _all_low():
-    for pin in (FRONT_LEFT_IN1, FRONT_LEFT_IN2, FRONT_RIGHT_IN1, FRONT_RIGHT_IN2,
-                REAR_LEFT_IN1,  REAR_LEFT_IN2,  REAR_RIGHT_IN1, REAR_RIGHT_IN2):
+    for pin in (
+        FRONT_LEFT_IN1, FRONT_LEFT_IN2, FRONT_RIGHT_IN1, FRONT_RIGHT_IN2,
+        REAR_LEFT_IN1,  REAR_LEFT_IN2,  REAR_RIGHT_IN1, REAR_RIGHT_IN2
+    ):
         GPIO.output(pin, GPIO.LOW)
 
 def stop():
@@ -136,34 +131,38 @@ def stop():
 
 def forward():
     global current_action
-    GPIO.output(FRONT_LEFT_IN1, GPIO.HIGH);  GPIO.output(FRONT_LEFT_IN2, GPIO.LOW)
-    GPIO.output(FRONT_RIGHT_IN1, GPIO.HIGH); GPIO.output(FRONT_RIGHT_IN2, GPIO.LOW)
-    GPIO.output(REAR_LEFT_IN1, GPIO.HIGH);   GPIO.output(REAR_LEFT_IN2, GPIO.LOW)
-    GPIO.output(REAR_RIGHT_IN1, GPIO.HIGH);  GPIO.output(REAR_RIGHT_IN2, GPIO.LOW)
+    _all_low()
+    GPIO.output(FRONT_LEFT_IN1, GPIO.HIGH)
+    GPIO.output(FRONT_RIGHT_IN1, GPIO.HIGH)
+    GPIO.output(REAR_LEFT_IN1, GPIO.HIGH)
+    GPIO.output(REAR_RIGHT_IN1, GPIO.HIGH)
     current_action = "forward"
 
 def backward():
     global current_action
-    GPIO.output(FRONT_LEFT_IN1, GPIO.LOW);  GPIO.output(FRONT_LEFT_IN2, GPIO.HIGH)
-    GPIO.output(FRONT_RIGHT_IN1, GPIO.LOW); GPIO.output(FRONT_RIGHT_IN2, GPIO.HIGH)
-    GPIO.output(REAR_LEFT_IN1, GPIO.LOW);   GPIO.output(REAR_LEFT_IN2, GPIO.HIGH)
-    GPIO.output(REAR_RIGHT_IN1, GPIO.LOW);  GPIO.output(REAR_RIGHT_IN2, GPIO.HIGH)
+    _all_low()
+    GPIO.output(FRONT_LEFT_IN2, GPIO.HIGH)
+    GPIO.output(FRONT_RIGHT_IN2, GPIO.HIGH)
+    GPIO.output(REAR_LEFT_IN2, GPIO.HIGH)
+    GPIO.output(REAR_RIGHT_IN2, GPIO.HIGH)
     current_action = "backward"
 
 def rotate_left():
     global current_action
-    GPIO.output(FRONT_LEFT_IN1, GPIO.LOW);   GPIO.output(FRONT_LEFT_IN2, GPIO.HIGH)
-    GPIO.output(FRONT_RIGHT_IN1, GPIO.HIGH); GPIO.output(FRONT_RIGHT_IN2, GPIO.LOW)
-    GPIO.output(REAR_LEFT_IN1, GPIO.LOW);    GPIO.output(REAR_LEFT_IN2, GPIO.HIGH)
-    GPIO.output(REAR_RIGHT_IN1, GPIO.HIGH);  GPIO.output(REAR_RIGHT_IN2, GPIO.LOW)
+    _all_low()
+    GPIO.output(FRONT_RIGHT_IN1, GPIO.HIGH)
+    GPIO.output(REAR_RIGHT_IN1, GPIO.HIGH)
+    GPIO.output(FRONT_LEFT_IN2, GPIO.HIGH)
+    GPIO.output(REAR_LEFT_IN2, GPIO.HIGH)
     current_action = "rotate_left"
 
 def rotate_right():
     global current_action
-    GPIO.output(FRONT_LEFT_IN1, GPIO.HIGH); GPIO.output(FRONT_LEFT_IN2, GPIO.LOW)
-    GPIO.output(FRONT_RIGHT_IN1, GPIO.LOW); GPIO.output(FRONT_RIGHT_IN2, GPIO.HIGH)
-    GPIO.output(REAR_LEFT_IN1, GPIO.HIGH);  GPIO.output(REAR_LEFT_IN2, GPIO.LOW)
-    GPIO.output(REAR_RIGHT_IN1, GPIO.LOW);  GPIO.output(REAR_RIGHT_IN2, GPIO.HIGH)
+    _all_low()
+    GPIO.output(FRONT_LEFT_IN1, GPIO.HIGH)
+    GPIO.output(REAR_LEFT_IN1, GPIO.HIGH)
+    GPIO.output(FRONT_RIGHT_IN2, GPIO.HIGH)
+    GPIO.output(REAR_RIGHT_IN2, GPIO.HIGH)
     current_action = "rotate_right"
 
 def toggle_logging():
@@ -181,7 +180,6 @@ def main():
         return
     joystick = pygame.joystick.Joystick(0)
     joystick.init()
-    # Flush any initial button events (e.g., GUIDE button) to avoid accidental exit
     pygame.event.clear()
 
     print("Gamepad:", joystick.get_name())
@@ -218,7 +216,7 @@ def main():
                 rotate_right()
 
             _maybe_log()
-            sleep(0.05)
+            sleep(0.005)  # minimal pause to reduce CPU busy-wait
     finally:
         if _CAM_BACKEND == "picamera2":
             picam.stop()

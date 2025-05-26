@@ -27,7 +27,7 @@ FL_IN1, FL_IN2, FL_EN = 20, 21, 16
 FR_IN1, FR_IN2, FR_EN = 13, 26, 19
 RR_IN1, RR_IN2, RR_EN = 24, 23, 25
 RL_IN1, RL_IN2, RL_EN = 7,  8,  12
-PWM_FREQ_HZ, SPEED = 1000, 30  # %
+PWM_FREQ_HZ, SPEED = 1000, 40  # %
 
 # ─── модель и инференс ─────────────────────────────────────
 MODEL_PATH  = Path("robot_action_cnn_2.pth")

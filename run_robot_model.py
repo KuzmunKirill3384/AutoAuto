@@ -1,12 +1,4 @@
 #!/usr/bin/env python3
-"""
-Autonomous 4-wheel robot (Picamera2 only).
-
-Каждые 0.2 с берёт кадр, прогоняет через TinyCNN и
-вызывает forward / backward / rotate_left / rotate_right / stop.
-
-Мощность моторов увеличена: PWM duty-cycle = 95 %.
-"""
 
 from __future__ import annotations
 import sys, time, argparse

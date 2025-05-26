@@ -30,10 +30,10 @@ FRONT_RIGHT_IN1, FRONT_RIGHT_IN2, FRONT_RIGHT_EN = 13, 26, 19
 REAR_RIGHT_IN1, REAR_RIGHT_IN2, REAR_RIGHT_EN   = 24, 23, 25
 REAR_LEFT_IN1,  REAR_LEFT_IN2,  REAR_LEFT_EN    = 7,  8,  12
 PWM_FREQ_HZ = 1000
-SPEED       = 35            # duty-cycle %
+SPEED       = 30           # duty-cycle %
 
 # ─── модель и параметры инференса ───────────────────────────
-MODEL_PATH   = Path("robot_action_cnn.pth")
+MODEL_PATH   = Path("robot_action_cnn_2.pth")
 IMG_SIZE     = (96, 128)     # H×W
 ACTIONS      = ["forward", "backward", "rotate_left", "rotate_right"]
 FRAME_PERIOD = 0.01          # минимальная пауза между кадрами

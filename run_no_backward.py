@@ -34,7 +34,7 @@ RL_IN1, RL_IN2, RL_EN = 7,  8,  12
 PWM_FREQ_HZ, SPEED = 1000, 30                 # %
 
 # ─── модель и инференс ────────────────────────────────────
-SCRIPT_PATH  = Path("robot_action_cnn_2.pth")   # ← TorchScript на 3 класса
+SCRIPT_PATH  = Path("robot_action_cnn_script.pt")   # ← TorchScript на 3 класса
 IMG_SIZE     = (96, 128)                            # H×W
 ACTIONS      = ["forward", "rotate_left", "rotate_right"]
 FRAME_PERIOD = 0.01                                 # c (≈100 FPS)

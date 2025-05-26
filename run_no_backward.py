@@ -30,7 +30,7 @@ RL_IN1, RL_IN2, RL_EN = 7,  8,  12
 PWM_FREQ_HZ, SPEED = 1000, 30  # %
 
 # ─── модель и инференс ─────────────────────────────────────
-MODEL_PATH  = Path("robot_action_cnn.pth")
+MODEL_PATH  = Path("robot_action_cnn_2.pth")
 IMG_SIZE    = (96, 128)          # H × W
 ACTIONS     = ["forward", "rotate_left", "rotate_right"]  # ← 3 класса
 FRAME_PERIOD = 0.01              # ~100 FPS

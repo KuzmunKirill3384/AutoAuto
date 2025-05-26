@@ -30,7 +30,6 @@ SPEED = 45        # duty-cycle ≈ 95 % — почти максимум
 MODEL_PATH  = Path("robot_action_cnn.pth")
 IMG_SIZE    = (96, 128)                 # H×W
 ACTIONS     = ["forward","backward","rotate_left","rotate_right"]
-# … (остальной код без изменений выше) …
 
 FRAME_PERIOD = 0.01          # минимальная пауза между кадрами (~100 FPS)
 

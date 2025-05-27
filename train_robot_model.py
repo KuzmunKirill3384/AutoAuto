@@ -1,216 +1,241 @@
 #!/usr/bin/env python3
 """
-Tiny-CNN trainer for four-wheel robot actions **с автоматической очисткой "стоп"-кадров**.
+MobileNetV3-Small trainer (macOS / M-GPU, без backward).
 
-• Перед обучением на лету фильтрует и *удаляет* кадры, записанные в состоянии stop.
-  – Строки с action == "stop" вырезаются из labels.csv.
-  – Соответствующие изображения (по-умолчанию) удаляются с диска.
-  – Создаёт резервную копию оригинального labels.csv (labels.csv.bak).
-• Далее обучает лёгкую CNN на четырёх оставшихся действиях.
-• Показывает tqdm-прогресс и (опционально) зажигает LED на GPIO18.
-• Сохраняет модель в robot_action_cnn.pth.
-
-Запуск:
-    python3 train_robot_model.py
-Никакой дополнительной настройки не требуется.
+• dataset  : /Users/kuzminkirill/Downloads/pi
+• classes  : forward / rotate_left / rotate_right
+• bottom-mask 30-45 %
+• полностью игнорируем backward (и stop)
+• no channels_last → никакой ошибки view/stride
 """
+
 from __future__ import annotations
-
-import csv
 import os
-import shutil
+import random
+import re
+import ssl
 import sys
+import time
 from pathlib import Path
-from typing import List, Tuple
+from collections import defaultdict
 
-# ────────────────────────── GPIO (опц.) ──────────────────────────
-try:
-    import RPi.GPIO as GPIO  # type: ignore
-except (ImportError, RuntimeError):
-    GPIO = None  # не на Pi
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+from torchvision import transforms, models
+from torchvision.transforms.functional import InterpolationMode
+from PIL import Image, ImageDraw
+from tqdm.auto import tqdm
+import numpy as np
 
-# ────────────────────────── ML ─────────────────────────────———
-try:
-    import torch
-    import torch.nn as nn
-    import torch.nn.functional as F
-    from torch.utils.data import Dataset, DataLoader, random_split
-    from torchvision import transforms
-except ImportError:
-    sys.stderr.write(
-        "❌  PyTorch not found. Install with:\n"
-        "    pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu\n"
-    )
-    raise
+# ─── Config ────────────────────────────────────────────────
+DATASET_DIR = Path("/Users/kuzminkirill/Downloads/pi")   # путь к папке с изображениями
+IMG_SIZE    = (96, 128)                                  # размер входа сети: (высота, ширина)
+ACTIONS     = ["forward", "rotate_left", "rotate_right"] # целевые классы
+IGNORE      = {"stop", "backward"}                       # метки, которые игнорируем
 
-from PIL import Image  # type: ignore
-from tqdm import tqdm  # type: ignore
+BATCH_SIZE  = 64      # число примеров в одном батче
+EPOCHS      = 20      # сколько полных проходов по датасету
+LR, WD      = 3e-4, 1e-4  # learning rate и weight decay для AdamW
+VAL_SPLIT   = .15      # доля валидации от общего числа примеров
+SEED        = 42       # сид для детерминизма
 
-# ────────────────────────── config ───────────────────────────
-DATASET_DIR = Path("dataset")
-LABELS_CSV = DATASET_DIR / "labels.csv"
-LED_PIN = 18               # None → отключить LED
-IMG_SIZE = (96, 128)       # H×W
-BATCH_SIZE = 32
-EPOCHS = 10
-LR = 1e-3
-VAL_SPLIT = 0.15
-CLEAN_STOP_IMAGES = True   # удалять jpg кадров «stop»
-ACTIONS = [
-    "forward",
-    "backward",
-    "rotate_left",
-    "rotate_right",
-]
+# Отключаем проверку SSL, чтобы не было ошибок при загрузке предобученных весов
+ssl._create_default_https_context = ssl._create_unverified_context
+torch.hub._validate_ssl = False
 
-# ────────────────────────── helpers ──────────────────────────
+# регулярка ищет только нужные метки в имени файла
+ACTION_RE = re.compile("|".join(ACTIONS + list(IGNORE)))
 
-def _prepare_led():
-    if GPIO is None or LED_PIN is None:
-        return None
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(LED_PIN, GPIO.OUT)
-    return LED_PIN
+# ─── BottomMask: затемнение низа ─────────────────────────────
+class BottomMask:
+    """Затемняет снизу кадра черным прямоугольником."""
+    def __init__(self, min_frac: float = .30, max_frac: float = .45):
+        """
+        min_frac, max_frac — минимальный и максимальный процент высоты
+        кадра, который будет затемнен (30–45%).
+        """
+        self.min_frac = min_frac
+        self.max_frac = max_frac
 
-# ---------- DATASET CLEANUP ----------------------------------
+    def __call__(self, img: Image.Image) -> Image.Image:
+        w, h = img.size
+        # выбираем случайную долю для затенения
+        frac = random.uniform(self.min_frac, self.max_frac)
+        y0 = int(h * (1.0 - frac))  # вычисляем старт y для прямоугольника
+        img = img.copy()
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([(0, y0), (w, h)], fill=0)
+        return img
 
-def clean_dataset():
-    """Удаляет записи/файлы с action==stop. Создаёт labels.csv.bak."""
-    if not LABELS_CSV.exists():
-        sys.exit(f"❌  {LABELS_CSV} not found – нечего чистить")
+# ─── Сборка списка файлов ➜ фильтруем backward и stop ───────────
+def collect_samples() -> list[tuple[Path,int]]:
+    files = list(DATASET_DIR.rglob("*.[jp][pn]g"))  # ищем jpg и png
+    if not files:
+        sys.exit(f"No images in {DATASET_DIR}")
+    out = []
+    for f in files:
+        m = ACTION_RE.search(f.stem)
+        if not m:
+            continue
+        lbl = m.group()
+        if lbl in IGNORE:  # пропускаем ненужные метки
+            continue
+        out.append((f, ACTIONS.index(lbl)))
+    random.shuffle(out)
+    return out
 
-    backup = LABELS_CSV.with_suffix(".csv.bak")
-    if not backup.exists():
-        shutil.copy(LABELS_CSV, backup)
+# ─── Функция разбивки на train/val ────────────────────────────────────
+def split(arr: list[tuple[Path,int]], ratio: float) -> tuple[list, list]:
+    """
+    ratio — доля данных ушедших на валидацию (например, .15 = 15%).
+    Возвращает два списка: train и val.
+    """
+    per = defaultdict(list)
+    for p, l in arr:
+        per[l].append((p, l))
+    tr, va = [], []
+    for l, lst in per.items():
+        random.shuffle(lst)
+        k = int(len(lst) * ratio)
+        va += lst[:k]
+        tr += lst[k:]
+    random.shuffle(tr)
+    random.shuffle(va)
+    return tr, va
 
-    kept_lines: List[str] = []
-    removed = 0
-    with backup.open() as fp:
-        reader = csv.reader(fp)
-        for row in reader:
-            fname, action, *_ = row
-            if action == "stop":
-                removed += 1
-                if CLEAN_STOP_IMAGES:
-                    img_path = DATASET_DIR / fname
-                    try:
-                        img_path.unlink(missing_ok=True)
-                    except Exception as e:
-                        print(f"⚠️  Could not delete {img_path}: {e}")
-                continue
-            kept_lines.append(",".join(row))
+# ─── Dataset-класс для PyTorch ───────────────────────────────────────
+class RobotDS(Dataset):
+    def __init__(self, items: list[tuple[Path,int]], tfm: transforms.Compose):
+        self.items = items  # список (путь, метка)
+        self.tfm   = tfm    # трансформации
 
-    LABELS_CSV.write_text("\n".join(kept_lines) + "\n")
-    print(f"🧹  Cleaned dataset: removed {removed} 'stop' samples, kept {len(kept_lines)} others")
+    def __len__(self) -> int:
+        return len(self.items)
 
-class RobotDataset(Dataset):
-    def __init__(self, root: Path, labels_file: Path, tfms: transforms.Compose):
-        self.samples: List[Tuple[Path, int]] = []
-        self.tfms = tfms
-        with labels_file.open() as fp:
-            reader = csv.reader(fp)
-            for row in reader:
-                fname, action, *_ = row
-                if action not in ACTIONS:
-                    continue
-                img_path = root / fname
-                if img_path.exists():
-                    self.samples.append((img_path, ACTIONS.index(action)))
-        if not self.samples:
-            raise RuntimeError("No training samples found – проверьте dataset после очистки")
+    def __getitem__(self, idx: int):
+        p, lbl = self.items[idx]
+        img = Image.open(p).convert("RGB")
+        return self.tfm(img), lbl
 
-    def __len__(self):
-        return len(self.samples)
+# ─── Создание модели ────────────────────────────────────────────────
+def build_model() -> nn.Module:
+    """
+    Загружаем MobileNetV3-Small с предобученными весами ImageNet,
+    меняем последний слой под число наших классов.
+    """
+    net = models.mobilenet_v3_small(weights="IMAGENET1K_V1")
+    in_f = net.classifier[3].in_features
+    net.classifier[3] = nn.Linear(in_f, len(ACTIONS))
+    return net
 
-    def __getitem__(self, idx):
-        path, label = self.samples[idx]
-        img = Image.open(path).convert("RGB")
-        return self.tfms(img), label
+# ─── Основной тренировочный цикл ────────────────────────────────────
+def main():
+    random.seed(SEED)
+    torch.manual_seed(SEED)
 
-class TinyCNN(nn.Module):
-    def __init__(self, n_classes=len(ACTIONS)):
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 16, 3, padding=1)
-        self.conv2 = nn.Conv2d(16, 32, 3, padding=1)
-        self.conv3 = nn.Conv2d(32, 64, 3, padding=1)
-        self.pool = nn.MaxPool2d(2, 2)
-        dummy = torch.zeros(1, 3, *IMG_SIZE)
-        with torch.no_grad():
-            n_flat = self._conv_forward(dummy).numel()
-        self.fc1 = nn.Linear(n_flat, 128)
-        self.fc2 = nn.Linear(128, n_classes)
+    # 1. Собираем и разделяем данные
+    samples      = collect_samples()
+    train_it, val_it = split(samples, VAL_SPLIT)
+    print(f"train {len(train_it)} | val {len(val_it)}")
 
-    def _conv_forward(self, x):
-        x = self.pool(torch.relu(self.conv1(x)))
-        x = self.pool(torch.relu(self.conv2(x)))
-        x = self.pool(torch.relu(self.conv3(x)))
-        return x
-
-    def forward(self, x):
-        x = self._conv_forward(x)
-        x = x.flatten(1)
-        x = torch.relu(self.fc1(x))
-        return self.fc2(x)
-
-# ────────────────────────── training ─────────────────────────
-
-def train():
-    if not DATASET_DIR.exists():
-        sys.exit(f"❌  {DATASET_DIR}/ not found – положите туда данные")
-
-    clean_dataset()
-
-    tfms = transforms.Compose([
+    # 2. Определяем трансформации
+    aug = transforms.Compose([
+        BottomMask(.30, .45),  # затемняем низ кадра
+        transforms.Resize((IMG_SIZE[0] + 24, IMG_SIZE[1] + 24),
+                          interpolation=InterpolationMode.BILINEAR),
+        transforms.RandomCrop(IMG_SIZE),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(.3, .3, .3, .1),
+        transforms.ToTensor(),
+        transforms.Normalize((.5, .5, .5), (.5, .5, .5)),
+    ])
+    plain = transforms.Compose([
+        BottomMask(.30, .45),
         transforms.Resize(IMG_SIZE[::-1]),
         transforms.ToTensor(),
+        transforms.Normalize((.5, .5, .5), (.5, .5, .5)),
     ])
-    full_ds = RobotDataset(DATASET_DIR, LABELS_CSV, tfms)
 
-    val_len = int(len(full_ds) * VAL_SPLIT)
-    train_len = len(full_ds) - val_len
-    train_ds, val_ds = random_split(full_ds, [train_len, val_len])
+    # 3. Сложная часть: создаем взвешенный семплер для балансировки классов
+    hist = np.bincount([lbl for _, lbl in train_it], minlength=len(ACTIONS))
+    w = 1.0 / torch.tensor(hist, dtype=torch.float32)
+    sampler = WeightedRandomSampler(
+        [w[l].item() for _, l in train_it],
+        num_samples=len(train_it),
+        replacement=True
+    )
 
-    loader = lambda d, shuf: DataLoader(d, BATCH_SIZE, shuffle=shuf, num_workers=2, pin_memory=False)
-    train_loader, val_loader = loader(train_ds, True), loader(val_ds, False)
+    # 4. Создаем загрузчики данных
+    tr_dl = DataLoader(
+        RobotDS(train_it, aug),
+        batch_size=BATCH_SIZE,
+        sampler=sampler,
+        num_workers=os.cpu_count(),
+        persistent_workers=True,
+        prefetch_factor=4
+    )
+    va_dl = DataLoader(
+        RobotDS(val_it, plain),
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=os.cpu_count(),
+        persistent_workers=True,
+        prefetch_factor=4
+    )
 
-    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TinyCNN().to(dev)
-    opt = torch.optim.Adam(model.parameters(), lr=LR)
-    crit = nn.CrossEntropyLoss()
+    # 5. Выбираем устройство (MPS на Mac или CPU)
+    dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    print("Device:", dev)
 
-    led = _prepare_led()
-    if led is not None:
-        GPIO.output(led, GPIO.HIGH)
+    # 6. Строим модель и замораживаем backbone на первые 3 эпохи
+    net = build_model().to(dev)
+    for p in net.features.parameters():
+        p.requires_grad = False
 
-    try:
-        for epoch in range(1, EPOCHS + 1):
-            model.train()
-            total_loss = 0
-            pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{EPOCHS}")
-            for imgs, lbls in pbar:
-                imgs, lbls = imgs.to(dev), lbls.to(dev)
-                opt.zero_grad()
-                loss = crit(model(imgs), lbls)
-                loss.backward(); opt.step()
-                total_loss += loss.item() * imgs.size(0)
-                pbar.set_postfix(loss=total_loss / ((pbar.n + 1) * BATCH_SIZE))
+    # 7. Настраиваем оптимизатор и lr-расписание
+    opt   = torch.optim.AdamW(net.parameters(), lr=LR, weight_decay=WD)
+    sched = torch.optim.lr_scheduler.OneCycleLR(
+        opt,
+        max_lr=LR * 10,
+        total_steps=EPOCHS * len(tr_dl)
+    )
+    loss_fn = nn.CrossEntropyLoss(label_smoothing=0.05)
 
-            model.eval(); correct = total = 0
-            with torch.no_grad():
-                for imgs, lbls in val_loader:
-                    out = model(imgs.to(dev))
-                    pred = out.argmax(1)
-                    total += lbls.size(0)
-                    correct += (pred.cpu() == lbls).sum().item()
-            acc = 100 * correct / total
-            print(f"\n✅  Val accuracy: {acc:.2f}%  ({correct}/{total})\n")
+    best_acc = 0.0
+    for ep in range(1, EPOCHS + 1):
+        # разморозка backbone после 3 эпох
+        if ep == 4:
+            for p in net.features.parameters():
+                p.requires_grad = True
 
-        torch.save(model.state_dict(), "robot_action_cnn.pth")
-        print("🎉  Done. Model saved → robot_action_cnn.pth")
-    finally:
-        if led is not None:
-            GPIO.output(led, GPIO.LOW); GPIO.cleanup(led)
+        # --- фаза обучения ---
+        net.train()
+        for x, y in tqdm(tr_dl, desc=f"Epoch {ep}/{EPOCHS}", leave=False):
+            x, y = x.to(dev), y.to(dev)
+            opt.zero_grad()
+            loss = loss_fn(net(x), y)  # считаем лосс
+            loss.backward()
+            opt.step()
+            sched.step()
+
+        # --- фаза валидации ---
+        net.eval()
+        correct = 0
+        with torch.no_grad():
+            for x, y in va_dl:
+                pred = net(x.to(dev)).argmax(1).cpu()
+                correct += (pred == y).sum().item()
+        acc = 100 * correct / len(val_it)
+        print(f"Epoch {ep}: val acc {acc:.2f}%")
+        if acc > best_acc:
+            best_acc = acc
+            torch.save(net.state_dict(), "robot_action_cnn.pth")
+            print("✓ saved best model")
+
+    # 8. Экспорт пропускной модели в TorchScript
+    torch.jit.script(net.cpu()).save("robot_action_cnn_script.pt")
+    print("Training done, best acc:", best_acc)
 
 if __name__ == "__main__":
-    train()
+    main()

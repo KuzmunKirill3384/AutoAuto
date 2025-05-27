@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
 """
-Game-pad controlled four-wheel robot with dataset logger.
+Game-pad controlled four-wheel robot with photo-only dataset logger.
 
-Changes vs. original version
-────────────────────────────
-• «Reverse» включается только при почти полном отклонении стика назад
-  ( y_axis > BACKWARD_TRIGGER = 0.8 ).
-• Повороты требуют сильного отклонения вбок
-  ( |x_axis| > ROTATE_TRIGGER = 0.5 ).
-• Всё остальное — как было: логирование кадров, выбор скорости кнопками,
-  выключение логирования кнопкой 3, выход кнопкой 7.
+Изменения:
+• При логировании сохраняются только изображения, CSV больше не создаётся.
 """
 
-import os, sys, time
+import sys, time
 from pathlib import Path
 from typing import Optional, Callable
 from time import sleep
@@ -40,21 +34,22 @@ RL_IN1, RL_IN2, RL_EN = 7,  8,  12
 PWM_FREQ_HZ = 1000
 
 # ───────── input thresholds ────────────────────────────────
-DEADZONE         = 0.20   # «шумовая» зона
-BACKWARD_TRIGGER = 0.80   # reverse только при y > 0.80
-ROTATE_TRIGGER   = 0.50   # поворот при |x| > 0.50
+DEADZONE         = 0.20
+BACKWARD_TRIGGER = 0.80
+ROTATE_TRIGGER   = 0.50
 
 # ───────── dataset logging settings ────────────────────────
 SPEED_PRESETS = {1: 25, 2: 50, 3: 75}
-DATASET_DIR   = Path("dataset"); DATASET_DIR.mkdir(exist_ok=True)
-LABELS_CSV    = DATASET_DIR / "labels.csv"
+DATASET_DIR   = Path("dataset")
+DATASET_DIR.mkdir(exist_ok=True)
 
 current_speed_level: int = 1
 current_action: Optional[str] = None
-logging_enabled: bool = False     # toggle кнопкой 3
+logging_enabled: bool = False
 
 # ───────── GPIO initialisation ─────────────────────────────
-GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
 
 def _setup_motor(in1: int, in2: int, en: int):
     GPIO.setup(in1, GPIO.OUT); GPIO.setup(in2, GPIO.OUT); GPIO.setup(en, GPIO.OUT)
@@ -70,13 +65,12 @@ rr_pwm = _setup_motor(RR_IN1, RR_IN2, RR_EN)
 
 # ───────── camera init ─────────────────────────────────────
 CaptureFunc = Callable[[], Optional["numpy.ndarray"]]
-def _capture_none(): return None  # fallback
-_capture_frame: CaptureFunc = _capture_none  # default
+def _capture_none(): return None
+_capture_frame: CaptureFunc = _capture_none
 
 if _CAM_BACKEND == "picamera2":
     picam = Picamera2()
-    picam.configure(picam.create_video_configuration(main={"size": (640,480),
-                                                           "format":"RGB888"}))
+    picam.configure(picam.create_video_configuration(main={"size": (640,480), "format":"RGB888"}))
     picam.start()
     _capture_frame = lambda: picam.capture_array()
     print("Camera backend: picamera2")
@@ -105,12 +99,13 @@ def set_speed(level: int):
         print("Speed →", level)
 
 def _save_frame(frame, action: str):
+    # сохраняем только фото, без CSV
     import cv2 as _cv2
-    ts = int(time.time()*1000)
+    ts = int(time.time() * 1000)
     fname = f"{ts}_{action}_{current_speed_level}.jpg"
-    _cv2.imwrite(str(DATASET_DIR / fname), frame)
-    with LABELS_CSV.open("a") as fp:
-        print(f"{fname},{action},{current_speed_level},{ts}", file=fp)
+    path = DATASET_DIR / fname
+    _cv2.imwrite(str(path), frame)
+    print("Saved", path)
 
 def _maybe_log():
     if logging_enabled and current_action:
@@ -119,41 +114,41 @@ def _maybe_log():
             _save_frame(frame, current_action)
 
 def _all_low():
-    for pin in (FL_IN1, FL_IN2, FR_IN1, FR_IN2,
-                RL_IN1, RL_IN2, RR_IN1, RR_IN2):
+    for pin in (FL_IN1, FL_IN2, FR_IN1, FR_IN2, RL_IN1, RL_IN2, RR_IN1, RR_IN2):
         GPIO.output(pin, GPIO.LOW)
 
 # ───────── motion primitives ───────────────────────────────
 def stop():
     global current_action
-    _all_low(); current_action = "stop"
+    _all_low()
+    current_action = "stop"
 
 def forward():
     global current_action
     _all_low()
-    GPIO.output(FL_IN1,GPIO.HIGH); GPIO.output(RL_IN1,GPIO.HIGH)
-    GPIO.output(FR_IN1,GPIO.HIGH); GPIO.output(RR_IN1,GPIO.HIGH)
+    GPIO.output(FL_IN1, GPIO.HIGH); GPIO.output(RL_IN1, GPIO.HIGH)
+    GPIO.output(FR_IN1, GPIO.HIGH); GPIO.output(RR_IN1, GPIO.HIGH)
     current_action = "forward"
 
 def backward():
     global current_action
     _all_low()
-    GPIO.output(FL_IN2,GPIO.HIGH); GPIO.output(RL_IN2,GPIO.HIGH)
-    GPIO.output(FR_IN2,GPIO.HIGH); GPIO.output(RR_IN2,GPIO.HIGH)
+    GPIO.output(FL_IN2, GPIO.HIGH); GPIO.output(RL_IN2, GPIO.HIGH)
+    GPIO.output(FR_IN2, GPIO.HIGH); GPIO.output(RR_IN2, GPIO.HIGH)
     current_action = "backward"
 
 def rotate_left():
     global current_action
     _all_low()
-    GPIO.output(FR_IN1,GPIO.HIGH); GPIO.output(RR_IN1,GPIO.HIGH)
-    GPIO.output(FL_IN2,GPIO.HIGH); GPIO.output(RL_IN2,GPIO.HIGH)
+    GPIO.output(FR_IN1, GPIO.HIGH); GPIO.output(RR_IN1, GPIO.HIGH)
+    GPIO.output(FL_IN2, GPIO.HIGH); GPIO.output(RL_IN2, GPIO.HIGH)
     current_action = "rotate_left"
 
 def rotate_right():
     global current_action
     _all_low()
-    GPIO.output(FL_IN1,GPIO.HIGH); GPIO.output(RL_IN1,GPIO.HIGH)
-    GPIO.output(FR_IN2,GPIO.HIGH); GPIO.output(RR_IN2,GPIO.HIGH)
+    GPIO.output(FL_IN1, GPIO.HIGH); GPIO.output(RL_IN1, GPIO.HIGH)
+    GPIO.output(FR_IN2, GPIO.HIGH); GPIO.output(RR_IN2, GPIO.HIGH)
     current_action = "rotate_right"
 
 def toggle_logging():
@@ -187,13 +182,13 @@ def main():
 
             if abs(x) < DEADZONE and abs(y) < DEADZONE:
                 stop()
-            elif y < -DEADZONE:              # стик вперёд
+            elif y < -DEADZONE:
                 forward()
-            elif y > BACKWARD_TRIGGER:       # стик почти внизу
+            elif y > BACKWARD_TRIGGER:
                 backward()
-            elif x < -ROTATE_TRIGGER:        # сильный влево
+            elif x < -ROTATE_TRIGGER:
                 rotate_left()
-            elif x >  ROTATE_TRIGGER:        # сильный вправо
+            elif x > ROTATE_TRIGGER:
                 rotate_right()
             else:
                 stop()
@@ -208,7 +203,7 @@ def main():
         pygame.quit()
         for p in (fl_pwm, fr_pwm, rl_pwm, rr_pwm): p.stop()
         GPIO.cleanup()
-        print("Shutdown complete – dataset at", DATASET_DIR)
+        print("Shutdown complete – photos saved in", DATASET_DIR)
 
 if __name__ == "__main__":
     main()
